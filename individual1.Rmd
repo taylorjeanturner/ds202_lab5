@@ -1,0 +1,215 @@
+---
+title: "ds202_lab5"
+author: "Taylor Turner"
+date: "11/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+acc <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/accident.csv", stringsAsFactors = FALSE)
+person <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/person.csv", stringsAsFactors = FALSE)
+```
+1. The weekend (Friday - Sunday) has the most accidents. Saturday has the most accidents, Friday has the second most, and Sunday has the third most. This is most likely because it's the weekend and more people are driving places or doing things. Most people work on weekdays so they're less likely to be driving during their work hours.
+```{r}
+acc$DAY_WEEK = as.factor(acc$DAY_WEEK)
+levels(acc$DAY_WEEK) <-  c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+acc%>%
+  group_by(DAY_WEEK)%>%
+  summarise(total = n(), .groups = 'drop')
+
+acc%>%
+  group_by(DAY_WEEK)%>%
+  summarise(total = n(), .groups = 'drop')%>%
+  ggplot(aes(x = DAY_WEEK, y = total))+
+  geom_bar(stat = 'identity') +
+  ggtitle('Accidents per Day of Week')+
+  xlab('Day of Week')
+
+```
+
+2. Looking at the FARS manual, I found that the code for fatal injury was 4 so I filtered the person data set by INJ_SEV == 4 to keep only fatal injuries.
+```{r}
+fatal <- person%>%
+  filter(INJ_SEV == 4)
+head(fatal)
+```
+
+3. I did this by first joining the accident data frame and the data frame created in question 2. I Then selected the necessary columns (STATE, MAKE). I grouped state and make together and found the amount of times each of those combinations were in the data frame. I then grouped by state to find which make in each state had the greatest amount of people who were fatally hurt by the certain make.
+```{r}
+make <- left_join(acc, fatal, by="ST_CASE")
+make <- make%>%
+  rename(STATE = STATE.x)%>%
+  select(STATE, MAKE)
+make <- na.omit(make)
+make <- make%>%
+  group_by(STATE, MAKE)%>%
+  summarise(total = n(), .groups = 'drop')%>%
+  group_by(STATE)%>%
+  top_n(1, total)
+    
+head(make)
+```
+
+4. The definition I used for the most dangerous vehicle was the certain make and model of a vehicle that caused the most people to be fatally hurt. I decided to use MAK_MOD because I thought it was more specific than just the make of a vehicle. Looking at the map we can see the make and model that shows up on many of the states is 72706. To find this data I repeated the steps from question 3 but for MAK_MOD in the person data frame. I then isolated States and their State code from the GLC to make it a little easier in the next step. Next I joined the states and stateCode in order to have both the state name and state code on the data frame. Then I grouped by region and found the midpoint of which the text will be placed. Then I joined that with the makeModel data frame. I then created a map of the US and labeled each state with their respective make and model code.
+```{r}
+USA <- readxl::read_xlsx("FRPP_GLC_-_United_StatesSep292020.xlsx")
+states <- map_data("state")
+states$region = toupper(states$region)
+
+makeModel <- left_join(acc, fatal, by="ST_CASE")
+makeModel <- makeModel%>%
+  rename(STATE = STATE.x)%>%
+  select(STATE, MAK_MOD)
+makeModel <- na.omit(makeModel)
+makeModel <- makeModel%>%
+  group_by(STATE, MAK_MOD)%>%
+  summarise(total = n(), .groups = 'drop')%>%
+  group_by(STATE)%>%
+  top_n(1, total)
+
+stateCode <- USA%>%
+  select('State Name', 'State Code')
+
+stateName <- states %>% 
+  left_join(stateCode, by = c('region' = 'State Name'))%>% 
+  group_by(region) %>% 
+  summarize(long = mean(long), lat = mean(lat), `State Code` = `State Code`, .groups = 'drop')%>%
+  distinct()%>%
+  left_join(makeModel, by = c('State Code' = 'STATE'))
+
+states %>% ggplot(aes(x = long, y = lat)) + 
+  geom_polygon(aes(group = group)) +
+  coord_map() +
+  geom_text(aes(label = MAK_MOD), color = 'deepskyblue1', data = stateName, size = 2) +
+  ggtitle("US States and their Most Dangerous Vehicle Make")
+
+```
+
+5. Join the accident and person table (work out which variable(s) to use)
+```{r}
+joined <- inner_join(acc, person, by="ST_CASE")
+head(joined)
+```
+
+6. I first wanted to make sure I had the necessary data so I filtered HOUR to hours of the day and SEX to male or female. For accidents by day of the week I grouped the data by DAY_WEEK and used tally() to count how many occurrences there were in each group. For accidents by hour of the day I grouped the data by HOUR and used tally() to count how many occurrences there were in each group. For accidents by sex I grouped the data by SEX and used tally() to count how many occurrences there were in each group. For each of these I decided a bar plot would nicely compare the groups. Then I compared how all three of these variables affect the total amount of accidents. I did this by making a facet_wrap.
+```{r}
+cleanJoin <- joined %>%
+  filter(HOUR.x >= 0 & HOUR.x <= 23)%>%
+  filter(SEX == 1 | SEX == 2)
+
+cleanJoin%>%
+  group_by(DAY_WEEK)%>%
+  tally()%>%
+  ggplot(aes(x = DAY_WEEK, y = n)) +
+  geom_bar(stat='identity')+
+  ggtitle("Number of Accidents by Day of the Week")+
+  ylab("Number of Accidents")+
+  xlab("Day of the Week")
+  
+cleanJoin%>%
+  group_by(HOUR.x)%>%
+  tally()%>%
+  ggplot(aes(x = HOUR.x, y = n)) +
+  geom_bar(stat='identity')+
+  ggtitle("Number of Accidents by Hour of the Day")+
+  xlab("Hour of the Day")+
+  ylab("Number of Accidents")
+
+cleanJoin%>%
+  mutate(gender = if_else(SEX=="1", "Male", "Female"))%>%
+  group_by(gender)%>%
+  tally()%>%
+  ggplot(aes(x = gender, y = n)) +
+  geom_bar(stat='identity', width = 0.5)+
+  ggtitle("Number of Accidents by Sex")+
+  xlab("Sex")+
+  ylab("Number of Accidents")
+
+totalAcc <- cleanJoin %>%
+  group_by(DAY_WEEK, HOUR.x, SEX) %>%
+  summarise(total = n(), .groups = 'drop')
+totalAcc %>%
+  mutate(gender = if_else(SEX=="1", "Male", "Female"))%>%
+  ggplot(aes(x = HOUR.x, y = total, fill = gender)) +
+  geom_bar(stat = 'identity') +
+  facet_wrap(~DAY_WEEK, scales = 'free') +
+  ggtitle('Number of Accidents per Gender, Day of Week, and Hour') +
+  xlab('Hour') +
+  ylab('Number of Accidents') +
+  labs(fill = 'Gender')
+```
+
+7. To find the number of deaths in each county I first made a deaths data frame. I did this by grouping the accidents data frame by county and summing up the amount of fatals for each county because according to the FARS manuals "FATALS" is the number of fatally injured persons in the crash. Next I selected county names and codes from the GLC data. Then I joined my deaths data grame with countyCodes and counties in order to get the county codes and names. Finally, I plotted the counties on a map and then filled it with the number of deaths per county.
+```{r}
+counties <- map_data("county")
+
+deaths = acc %>%
+  group_by(COUNTY) %>%
+  summarise('Number of Deaths' = sum(FATALS), .groups = 'drop')
+
+countyCodes <- USA %>%
+  select(c('County Name', 'County Code'))
+
+countyDeaths <- deaths %>%
+  inner_join(countyCodes, by = c('COUNTY' = 'County Code')) %>%
+  mutate(`County Name` = tolower(`County Name`)) %>%
+  unique() %>%
+  inner_join(counties, by = c('County Name' = 'subregion'))
+
+ggplot(counties, aes(x = long, y = lat)) + 
+  geom_polygon(aes(group = group)) +
+  geom_polygon(data = countyDeaths, aes(x = long, y = lat, group = group, fill = `Number of Deaths`))+
+  coord_map() +
+  ggtitle('Deaths Per County') 
+```
+
+8. Summer has more accidents than winter so I would say summer is more dangerous than winter. I classified summer months as June, July, and August (6,7,8) and winter months as December, January, and February (12, 1, 2). Summer has 9205 accidents while winter had 7733 accidents. In both seasons we can see from the maps that California, Florida, and Texas have the most accidents. In summer, California has 871, Florida has 675, and Texas has 841. In winter, California has 785, Florida has 768, and Texas has 791. Being from Iowa, I thought winter would have more accidents, but I then remembered that not every state has snowy and icy winters. I assume summer has more accidents because the weather is warmer and more people go on vacation and are traveling more during these months. If there's more people out, then there's a greater chance of having an accident.
+```{r}
+states <- map_data("state")
+states$region = toupper(states$region)
+
+summer <- acc%>%
+  filter(MONTH == 6 | MONTH == 7 | MONTH == 8)
+summer%>%
+  summarise(total = n())
+summer%>%
+  group_by(STATE)%>%
+  summarise(total = n(), .groups = 'drop')%>%
+  top_n(3, total)
+summer <- summer%>%
+  group_by(STATE)%>%
+  summarise(total = n(), .groups = 'drop')%>%
+  inner_join(USA, by = c(STATE = 'State Code'))%>%
+  select(STATE, 'State Name', total)%>%
+  distinct()%>%
+  inner_join(states, by = c('State Name' = 'region'))
+ggplot(summer, aes(x=long, y=lat, fill=total)) + 
+  geom_polygon(aes(group = group)) +
+  coord_map() +
+  ggtitle("Accidents in Summer")
+  
+winter <- acc%>%
+  filter(MONTH == 1 | MONTH == 2 | MONTH == 12)
+winter%>%
+  summarise(total = n())
+winter%>%
+  group_by(STATE)%>%
+  summarise(total = n(), .groups = 'drop')%>%
+  top_n(3, total)
+winter <- winter%>%
+  group_by(STATE)%>%
+  summarise(total = n(), .groups = 'drop')%>%
+  inner_join(USA, by = c(STATE = 'State Code'))%>%
+  select(STATE, 'State Name', total)%>%
+  distinct()%>%
+  inner_join(states, by = c('State Name' = 'region'))
+ggplot(winter, aes(x=long, y=lat, fill=total)) + 
+  geom_polygon(aes(group = group)) +
+  coord_map() +
+  ggtitle("Accidents in Winter")
+```
